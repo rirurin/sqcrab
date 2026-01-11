@@ -1,0 +1,11 @@
+[package]
+name = "sqcrab-samples"
+version.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license-file.workspace = true
+edition.workspace = true
+
+[dependencies]
+sqcrab = { path = "../sqcrab" }
