@@ -75,3 +75,17 @@ impl CanSquirrel for () {
         v
     }
 }
+
+impl CanSquirrel for String {
+    type Into = String;
+
+    const RETURNS: bool = true;
+
+    fn into_squirrel(&self) -> Self::Into {
+        self.clone()
+    }
+
+    fn from_squirrel(v: Self::Into) -> Self {
+        v
+    }
+}

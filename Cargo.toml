@@ -2,6 +2,9 @@
 
 members = [
     "sqcrab",
+    "sqcrab-builder",
+    "sqcrab-macro",
+    "sqcrab-macro-impl",
     "sqcrab-samples",
     "squirrel",
     "squirrel-sys"

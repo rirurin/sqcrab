@@ -21,7 +21,7 @@ fn check_version() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn test_stack_insertion() -> Result<(), Box<dyn Error>> {
+fn stack_insertion() -> Result<(), Box<dyn Error>> {
     let vm = unsafe { sq_open(0x400) };
     let sq_string = "crab";
     assert_eq!(unsafe { sq_gettop(vm) }, 0);
@@ -70,7 +70,7 @@ fn test_compile(vm: HSQUIRRELVM, path: &str) -> Result<SQRESULT, Box<dyn Error>>
 }
 
 #[test]
-fn test_compilation() -> Result<(), Box<dyn Error>> {
+fn compilation() -> Result<(), Box<dyn Error>> {
     let vm = unsafe { sq_open(0x400) };
     // path doesn't live long enough for it to be valid when the compiler error handler is called
     let good_path = "tests/data/sample_printf.nut";
@@ -114,7 +114,7 @@ fn test_squirrel_function(vm: HSQUIRRELVM, name: &str, value: SQInteger) {
 }
 
 #[test]
-fn test_call_squirrel_function() -> Result<(), Box<dyn Error>> {
+fn call_squirrel_function() -> Result<(), Box<dyn Error>> {
     let vm = unsafe { sq_open(0x400) };
     let path = "tests/data/sample_functions.nut";
     let functions = ["test1", "test2", "test3"];
