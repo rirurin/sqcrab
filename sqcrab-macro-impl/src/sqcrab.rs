@@ -1,7 +1,9 @@
 use proc_macro2::TokenStream;
-use quote::quote;
-use syn::parse::Parser;
+// use quote::quote;
+// use syn::parse::Parser;
 
+/*
+// Not neccessary, see sqcrab_builder::domain
 #[derive(Debug)]
 struct SqCrabParams {
 
@@ -25,6 +27,7 @@ fn sqcrab_inner(item: TokenStream) -> syn::Result<TokenStream> {
     }
     Ok(quote! {})
 }
+*/
 
 pub fn sqcrab(_: TokenStream, annotated_item: TokenStream) -> TokenStream {
     annotated_item

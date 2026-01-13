@@ -1,6 +1,7 @@
 use std::fmt::{Debug, Display, Formatter};
 use std::error::Error;
 use std::str::Utf8Error;
+use squirrel_sys::bindings::root::{SQInteger, HSQUIRRELVM};
 
 #[derive(Debug)]
 pub enum SquirrelError {
@@ -12,7 +13,9 @@ pub enum SquirrelError {
     CouldNotWakeupVM,
     Utf8Error(Utf8Error),
     CouldNotAddFunction,
-    CouldNotSetNativeClosureName
+    CouldNotSetNativeClosureName,
+    ObjectTypeDoesNotMatch,
+    CouldNotFindFunction(String)
 }
 
 impl Error for SquirrelError {}
@@ -21,3 +24,5 @@ impl Display for SquirrelError {
         <Self as Debug>::fmt(self, f)
     }
 }
+
+pub(crate) type ErrorCallback = unsafe extern "C" fn(HSQUIRRELVM) -> SQInteger;

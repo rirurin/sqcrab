@@ -1,10 +1,8 @@
 use std::error::Error;
 use squirrel::obj_type::UserPointer;
-use squirrel::print_cb::DebugHookType;
 use squirrel::squirrel;
 use squirrel::type_cnv::CanSquirrel;
 use squirrel::vm::SquirrelVM;
-use squirrel_sys::bindings::root::sq_gettype;
 
 #[test]
 fn check_version() -> Result<(), Box<dyn Error>> {
@@ -107,6 +105,11 @@ impl<'a> CanSquirrel for &'a mut TestUnit {
     }
 }
 
+unsafe extern "C" fn runtime_error_cb(h: squirrel_sys::bindings::root::HSQUIRRELVM) -> squirrel_sys::bindings::root::SQInteger {
+    println!("runtime error");
+    0
+}
+
 #[test]
 fn call_native_method_with_object() -> Result<(), Box<dyn Error>> {
     let mut sqvm = SquirrelVM::new()
@@ -137,6 +140,10 @@ fn call_native_method_with_object() -> Result<(), Box<dyn Error>> {
 
     })?;
     sqvm.add_function("add_hp", |vm| {
+        // u32 (hp to add)
+        // &mut TestUnit (unit)
+        // root table
+        // println!("set_hp stack size: {}", vm.get_stack_len()); // == 3
         let p = vm.get::<&mut TestUnit>(2).unwrap();
         p.hp += vm.get::<u32>(1).unwrap();
         0

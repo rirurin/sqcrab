@@ -111,13 +111,9 @@ unsafe extern "C" fn sq_function_base(handle: HSQUIRRELVM) -> SQInteger {
     let func_name = unsafe { std::ffi::CStr::from_ptr(info.funcname).to_str().unwrap() };
     let mut instances = get_squirrel_handle_instances();
     let handle_info = instances.as_mut()
-        .unwrap().get(&ThreadSafeSquirrelVMPointer(handle));
-    if handle_info.is_none() { return 0; }
-    let handle_info = handle_info.unwrap();
+        .unwrap().get(&ThreadSafeSquirrelVMPointer(handle)).unwrap();
     let sqvm = unsafe { &mut *handle_info.sqvm.as_ptr() };
-    let rust_func = handle_info.functions.get(func_name);
-    if rust_func.is_none() { return 0; }
-    let rust_func = *rust_func.unwrap();
+    let rust_func = *handle_info.functions.get(func_name).unwrap();
     // drop SQUIRREL_HANDLE_INSTANCES so other threads can run Squirrel scripts at the same time
     drop(instances);
     rust_func(sqvm)
@@ -132,6 +128,7 @@ pub struct SquirrelVMBuilder {
     notify_all_exceptions: bool,
     compile_error_cb: Option<crate::print_cb::CompilerErrorCallback>,
     debug_hook_cb: Option<crate::print_cb::DebugHookCallback>,
+    runtime_error_cb: Option<crate::err::ErrorCallback>,
 }
 
 impl Default for SquirrelVMBuilder {
@@ -145,7 +142,8 @@ impl Default for SquirrelVMBuilder {
             enable_debug_info: false,
             notify_all_exceptions: false,
             compile_error_cb: None,
-            debug_hook_cb: None
+            debug_hook_cb: None,
+            runtime_error_cb: None
         }
     }
 }
@@ -179,6 +177,10 @@ impl SquirrelVMBuilder {
         self.debug_hook_cb = Some(cb);
         self
     }
+    pub fn set_runtime_error_cb(mut self, cb: crate::err::ErrorCallback) -> Self {
+        self.runtime_error_cb = Some(cb);
+        self
+    }
 
     pub fn build(self) -> SquirrelVM {
         let handle = unsafe { sq_open((self.stack_size as i64).into()) };
@@ -203,6 +205,10 @@ impl SquirrelVMBuilder {
             sq_setnativedebughook(handle, Some(crate::print_cb::sq_debug_hook_callback));
             sq_enabledebuginfo(handle, self.enable_debug_info.into_squirrel());
             sq_notifyallexceptions(handle, self.notify_all_exceptions.into_squirrel());
+            if let Some(cb) = self.runtime_error_cb {
+                sq_newclosure(handle, Some(cb), 0);
+                sq_seterrorhandler(handle);
+            }
         }
         SquirrelVM { handle }
     }
@@ -240,21 +246,25 @@ macro_rules! squirrel {
             let n = stringify!($name);
             let handle: ::squirrel_sys::bindings::root::HSQUIRRELVM = unsafe { $vm.raw() };
             unsafe {
-               ::squirrel_sys::bindings::root::sq_pushroottable(handle);
-               ::squirrel_sys::bindings::root::sq_pushstring(handle, n.as_ptr() as _, n.len() as _);
-               ::squirrel_sys::bindings::root::sq_get(handle, -2); // get function from root table
-               ::squirrel_sys::bindings::root::sq_push(handle, -2); // root table
-               let args = (1 + $crate::sqvm_call_count_type_args!($($ty),*)) as i64;
-               $crate::sqvm_call_push_param!($vm $($val, $ty),*);
-               let res = ::squirrel_sys::bindings::root::sq_call(handle, args, true.into(), true.into());
-               match res {
-                   0 => {
-                       let val: $ret = $vm.get::<$ret>(1)?;
-                       ::squirrel_sys::bindings::root::sq_pop(handle, 3);
-                       Ok::<$ret, $crate::err::SquirrelError>(val)
-                   },
-                   _ => Err($crate::err::SquirrelError::ErrorWhileCalling)
-               }
+                ::squirrel_sys::bindings::root::sq_pushroottable(handle);
+                ::squirrel_sys::bindings::root::sq_pushstring(handle, n.as_ptr() as _, n.len() as _);
+                let res = ::squirrel_sys::bindings::root::sq_get(handle, -2); // get function from root table
+                if res == 0 {
+                    ::squirrel_sys::bindings::root::sq_push(handle, -2); // root table
+                    let args = (1 + $crate::sqvm_call_count_type_args!($($ty),*)) as i64;
+                    $crate::sqvm_call_push_param!($vm $($val, $ty),*);
+                    let res = ::squirrel_sys::bindings::root::sq_call(handle, args, true.into(), true.into());
+                    match res {
+                        0 => {
+                            let val: $ret = $vm.get::<$ret>(1)?;
+                            ::squirrel_sys::bindings::root::sq_pop(handle, 3);
+                            Ok::<$ret, $crate::err::SquirrelError>(val)
+                        },
+                        _ => Err($crate::err::SquirrelError::ErrorWhileCalling)
+                    }
+                } else {
+                    Err($crate::err::SquirrelError::CouldNotFindFunction(n.to_string()))
+                }
             }
         }
     };
@@ -303,25 +313,12 @@ impl SquirrelVM {
     }
 
     // get_type
-
-    // call
-    /*
-    pub fn call<T: CanSquirrel>(&self, name: &str, params: usize) -> Result<T, SquirrelError> {
-        unsafe {
-            sq_pushroottable(self.handle);
-            sq_pushstring(self.handle, name.as_ptr() as _, name.len() as _);
-            sq_get(self.handle, -2); // get function from root table
-            sq_push(self.handle, -2); // root table
-            let res = sq_call(self.handle, 1 + params as i64, true.into(), true.into());
-            let val  = self.get::<T>(1)?;
-            sq_pop(self.handle, 2 + (params as i64));
-            Ok(val)
-        }
+    pub unsafe fn get_type(&self, index: usize) -> SQObjectType {
+        unsafe { sq_gettype(self.handle, -(index as i64) )}
     }
-    */
 
     pub fn get_stack_len(&mut self) -> usize {
-        -unsafe { sq_gettop(self.handle) } as _
+        unsafe { sq_gettop(self.handle) as _ }
     }
 
     fn try_compile(&self, bytes: &str, path: &str) -> Result<(), SquirrelError> {
