@@ -2,7 +2,7 @@ use std::error::Error;
 use squirrel::obj_type::UserPointer;
 use squirrel::squirrel;
 use squirrel::type_cnv::CanSquirrel;
-use squirrel::vm::SquirrelVM;
+use squirrel::vm::{SquirrelDebugCallback, SquirrelVM};
 
 #[test]
 fn check_version() -> Result<(), Box<dyn Error>> {
@@ -15,24 +15,26 @@ fn check_version() -> Result<(), Box<dyn Error>> {
 #[test]
 fn call_squirrel_function() -> Result<(), Box<dyn Error>> {
     let mut sqvm = SquirrelVM::new()
-        .set_print_fn(|str| println!("{}", str))
-        .set_error_fn(|str| println!("error: {}", str))
+        .callbacks(|c| {
+            c.set_print_cb(|str| println!("{}", str));
+            c.set_error_cb(|str| println!("error: {}", str));
+            c.set_compile_error_cb(| desc, src, line, col| {
+                println!("compile error: '{}' @ '{}', {}:{}", desc, src, line, col);
+                /*
+                c.set_debug_hook_cb(|event, source, line, function| {
+                    let fmt =  match event {
+                        DebugHookType::CallFunc => format!("debug: CALL '{}' @ {}:{}", function, source, line),
+                        DebugHookType::ExecLine => format!("debug: LINE '{}' @ {}:{}", function, source, line),
+                        DebugHookType::RetFunc => format!("debug: RET '{}' @ {}:{}", function, source, line),
+                        _ => "debug: received an unknown event".to_string()
+                    };
+                    println!("{}", &fmt);
+                });
+                */
+            });
+        })
         .set_enable_debug_info(true)
         .set_notify_all_exceptions(true)
-        .set_compile_error_cb(| desc, src, line, col| {
-            println!("compile error: '{}' @ '{}', {}:{}", desc, src, line, col);
-        })
-        /*
-        .set_debug_hook_cb(|event, source, line, function| {
-            let fmt =  match event {
-                DebugHookType::CallFunc => format!("debug: CALL '{}' @ {}:{}", function, source, line),
-                DebugHookType::ExecLine => format!("debug: LINE '{}' @ {}:{}", function, source, line),
-                DebugHookType::RetFunc => format!("debug: RET '{}' @ {}:{}", function, source, line),
-                _ => "debug: received an unknown event".to_string()
-            };
-            println!("{}", &fmt);
-        })
-        */
         .build();
     let path = std::env::current_dir()?.join("tests/data/functions.nut");
     sqvm.import_text_from_file(path)?;
@@ -45,13 +47,15 @@ fn call_squirrel_function() -> Result<(), Box<dyn Error>> {
 #[test]
 fn call_native_function_with_object() -> Result<(), Box<dyn Error>> {
     let mut sqvm = SquirrelVM::new()
-        .set_print_fn(|str| println!("{}", str))
-        .set_error_fn(|str| println!("error: {}", str))
+        .callbacks(|c| {
+            c.set_print_cb(|str| println!("{}", str));
+            c.set_error_cb(|str| println!("error: {}", str));
+            c.set_compile_error_cb(| desc, src, line, col| {
+                println!("compile error: '{}' @ '{}', {}:{}", desc, src, line, col);
+            });
+        })
         .set_enable_debug_info(true)
         .set_notify_all_exceptions(true)
-        .set_compile_error_cb(| desc, src, line, col| {
-            println!("compile error: '{}' @ '{}', {}:{}", desc, src, line, col);
-        })
         .build();
     sqvm.add_function("square", |vm| {
         let p = vm.get::<u32>(1).unwrap();
@@ -113,24 +117,26 @@ unsafe extern "C" fn runtime_error_cb(h: squirrel_sys::bindings::root::HSQUIRREL
 #[test]
 fn call_native_method_with_object() -> Result<(), Box<dyn Error>> {
     let mut sqvm = SquirrelVM::new()
-        .set_print_fn(|str| println!("{}", str))
-        .set_error_fn(|str| println!("error: {}", str))
+        .callbacks(|c| {
+            c.set_print_cb(|str| println!("{}", str));
+            c.set_error_cb(|str| println!("error: {}", str));
+            c.set_compile_error_cb(| desc, src, line, col| {
+                println!("compile error: '{}' @ '{}', {}:{}", desc, src, line, col);
+            });
+            /*
+            c.set_debug_hook_cb(|event, source, line, function| {
+                let fmt =  match event {
+                    DebugHookType::CallFunc => format!("debug: CALL '{}' @ {}:{}", function, source, line),
+                    DebugHookType::ExecLine => format!("debug: LINE '{}' @ {}:{}", function, source, line),
+                    DebugHookType::RetFunc => format!("debug: RET '{}' @ {}:{}", function, source, line),
+                    _ => "debug: received an unknown event".to_string()
+                };
+                println!("{}", &fmt);
+            });
+            */
+        })
         .set_enable_debug_info(true)
         .set_notify_all_exceptions(true)
-        .set_compile_error_cb(| desc, src, line, col| {
-            println!("compile error: '{}' @ '{}', {}:{}", desc, src, line, col);
-        })
-        /*
-        .set_debug_hook_cb(|event, source, line, function| {
-            let fmt =  match event {
-                DebugHookType::CallFunc => format!("debug: CALL '{}' @ {}:{}", function, source, line),
-                DebugHookType::ExecLine => format!("debug: LINE '{}' @ {}:{}", function, source, line),
-                DebugHookType::RetFunc => format!("debug: RET '{}' @ {}:{}", function, source, line),
-                _ => "debug: received an unknown event".to_string()
-            };
-            println!("{}", &fmt);
-        })
-        */
         .build();
     let mut unit = TestUnit::default();
     sqvm.add_function("get_hp", |vm| {

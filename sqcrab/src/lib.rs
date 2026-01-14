@@ -5,3 +5,5 @@ pub mod logger;
 
 // Re-export squirrel crate
 pub use ::squirrel;
+
+pub use crab::SqCrab;

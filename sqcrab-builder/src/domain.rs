@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::path::Path;
 use std::time::Instant;
@@ -12,10 +12,24 @@ const RUST_FILE_EXTENSION: &'static str = "rs";
 const SQCRAB_HINT_ATTR: &'static str = "sqcrab_hint";
 const SQCRAB_ATTR: &'static str = "sqcrab";
 
-fn is_source_file(d: DirEntry) -> Option<DirEntry> {
+fn is_source_file(d: DirEntry, conf: &DomainBuilderConfig) -> Option<DirEntry> {
     // this iterator checks from src, which should all be rust files
     match d.file_type().is_file() {
-        true => Some(d),
+        true => {
+            let name = d.path().file_stem().unwrap().to_str().unwrap();
+            if &conf.get_output_file() == name {
+                return None;
+            }
+            match conf.get_includes() {
+                Some(p) => {
+                    match p.contains(&name) {
+                        true => Some(d),
+                        false => None
+                    }
+                },
+                None => Some(d)
+            }
+        },
         false => None
     }
 }
@@ -54,6 +68,9 @@ pub struct SqcrabParams {
 }
 
 impl SqcrabParams {
+
+    const DEFAULT_DOMAIN: &'static str = "Default";
+
     fn get_name_value(rhs: &syn::Expr) -> syn::Result<String> {
         if let syn::Expr::Lit(l) = rhs {
             if let syn::Lit::Str(s) = &l.lit {
@@ -149,6 +166,17 @@ impl<'a> ItemFunction<'a> {
         }
     }
 
+    fn get_domain(&self) -> String {
+        match &self.attribute.domain {
+            Some(n) => n.clone(),
+            None => SqcrabParams::DEFAULT_DOMAIN.to_string()
+        }
+    }
+
+    fn get_type_checking(&self) -> bool {
+        self.attribute.type_checking
+    }
+
     fn type_name_from_impl_block(ty: &syn::Type) -> Option<&syn::Ident> {
         match ty {
             // syn::Type::Path(p) => p.path.get_ident().and_then(|i| Some(i.to_string())),
@@ -170,22 +198,52 @@ impl<'a> ItemFunction<'a> {
         }
     }
 
-    fn build_method_call(&self) -> TokenStream {
+    fn build_struct_path(this_name: &syn::Ident, sup: &DomainBuilderSupportItem) -> syn::Result<TokenStream> {
+        Ok(if sup.declared_structs.contains(&this_name.to_string()) {
+            sup.module_path.parse()?
+        } else {
+            quote! { }
+        })
+    }
+
+    fn build_method_call(&self, sup: &DomainBuilderSupportItem) -> syn::Result<TokenStream> {
         match &self.this {
             Some(ty) => if let Some(this_name) = Self::type_name_from_impl_block(ty) {
+                let path = Self::build_struct_path(this_name, sup)?;
                 let method = &self.sig.ident;
-                quote! { #this_name :: #method }
+                Ok(quote! { #path #this_name :: #method })
             } else {
-                quote! { }
+                Err(syn::Error::new(Span::call_site(), "Impl declaration should have a name"))
             },
             None => {
                 let ident = &self.sig.ident;
-                quote! { #ident }
+                Ok(quote! { #ident })
             }
         }
     }
 
-    pub fn build(&self, path: &str) {
+    fn get_path_tokens(ty: &syn::Type) -> TokenStream {
+        match ty {
+            syn::Type::Path(p) => {
+                match p.path.get_ident() {
+                    Some(ident) => quote! { #ident },
+                    None => quote! { }
+                }
+            },
+            syn::Type::Reference(p) => {
+                let is_mut = p.mutability.is_some();
+                let elem = Self::get_path_tokens(p.elem.as_ref());
+                let m = match is_mut {
+                    true => quote! { &mut },
+                    false => quote! { & }
+                };
+                quote! { #m #elem }
+            }
+            _ => quote! {}
+        }
+    }
+
+    pub fn build(&self, sup: &DomainBuilderSupportItem) -> syn::Result<TokenStream> {
         let args: Vec<&syn::FnArg> = self.sig.inputs.iter().collect();
         let mut stack_idx = args.len();
         let mut param_decls = vec![];
@@ -200,37 +258,18 @@ impl<'a> ItemFunction<'a> {
                     if let Some(this_ty) = self.this {
                         if let Some(this_name) = Self::type_name_from_impl_block(this_ty) {
                             let ref_ty = Self::build_type_ref(is_ref, is_mut);
-                            // let this_name = syn::Ident::new(&this_name, Span::call_site());
+                            // let path_tokens: TokenStream = path.parse()?;
+                            let path = Self::build_struct_path(this_name, sup)?;
                             // TODO: Type checking
                             param_decls.push(quote! {
-                                let #param_name = vm.get::<#ref_ty #this_name>(#stack_idx).unwrap();
+                                let #param_name = vm.get::<#ref_ty #path #this_name>(#stack_idx).unwrap();
                             });
                         }
                     }
                 },
                 syn::FnArg::Typed(p) => {
-                    fn get_path_tokens(ty: &syn::Type) -> TokenStream {
-                        match ty {
-                            syn::Type::Path(p) => {
-                                match p.path.get_ident() {
-                                    Some(ident) => quote! { #ident },
-                                    None => quote! { }
-                                }
-                            },
-                            syn::Type::Reference(p) => {
-                                let is_mut = p.mutability.is_some();
-                                let elem = get_path_tokens(p.elem.as_ref());
-                                let m = match is_mut {
-                                    true => quote! { &mut },
-                                    false => quote! { & }
-                                };
-                                quote! { #m #elem }
-                            }
-                            _ => quote! {}
-                        }
-                    }
 
-                    let name = get_path_tokens(p.ty.as_ref());
+                    let name = Self::get_path_tokens(p.ty.as_ref());
                     param_decls.push(quote! {
                         let #param_name = vm.get::<#name>(#stack_idx).unwrap();
                     })
@@ -238,24 +277,101 @@ impl<'a> ItemFunction<'a> {
             }
             stack_idx -= 1;
         }
-        let method_call = self.build_method_call();
+        let method_call = self.build_method_call(sup)?;
         let param_list: Vec<syn::Ident> = param_decls.iter().enumerate().map(|(i, _)|
             syn::Ident::new(
                 &format!("p{}", param_decls.len() - i),
                 Span::call_site())).collect();
         let sq_name = self.get_squirrel_name();
-        let tokens = quote! {
-            sqvm.add_function(#sq_name, |vm| {
-                #(#param_decls)*
-                #method_call(#(#param_list),*);
-            })?;
+        let params_returned: i64 = match &self.sig.output {
+            syn::ReturnType::Default => 0,
+            syn::ReturnType::Type(_, t) => {
+                match t.as_ref() {
+                    // note: tuple with no elements is void
+                    syn::Type::Tuple(t) => (t.elems.iter().count() != 0).into(),
+                    _ => 1
+                }
+            }
         };
-        println!("{}", tokens.to_string());
+        let ret_type = match &self.sig.output {
+            syn::ReturnType::Type(_, t) => {
+                Some(Self::get_path_tokens(t.as_ref()))
+            },
+            _ => None
+        };
+        let method_call = match params_returned {
+            0 => quote! { #method_call(#(#param_list),*); },
+            _ => {
+                let ret_type = ret_type.unwrap();
+                quote! {
+                    let ret = #method_call(#(#param_list),*);
+                    vm.push::<#ret_type>(&ret);
+                }
+            }
+        };
+        Ok(quote! {
+            vm.add_function(#sq_name, |vm| {
+                #(#param_decls)*
+                #method_call
+                #params_returned
+            })?;
+        })
     }
 }
 
+pub struct DomainBuilderSupportItem<'a> {
+    // for structs that are declared in the current module
+    module_path: String,
+    imports: Vec<&'a syn::ItemUse>,
+    declared_structs: HashSet<String>
+}
+
+impl<'a> DomainBuilderSupportItem<'a> {
+    pub fn new(module_path: String) -> Self {
+        Self { module_path, imports: vec![], declared_structs: HashSet::new() }
+    }
+}
+
+pub struct DomainBuilderConfig {
+    table: Option<toml::Table>
+}
+
+impl DomainBuilderConfig {
+
+    const DEFAULT_OUTPUT: &'static str = "sqcrab_domains.rs";
+
+    pub fn new<P: AsRef<Path>>(dir: P) -> Result<Self, Box<dyn Error>> {
+        let sqcrab_toml = dir.as_ref().join("sqcrab.toml");
+        let table = match std::fs::exists(sqcrab_toml.as_path())? {
+            true => Some(std::fs::read_to_string(sqcrab_toml.as_path())?.parse::<toml::Table>()?),
+            false => None
+        };
+        Ok(Self { table })
+    }
+
+    #[inline]
+    fn get_output_file_inner(&self) -> Option<String> {
+        self.table.as_ref()
+            .and_then(|t| t.get("output"))
+            .and_then(|v| v.as_str())
+            .map(|v| format!("{}.rs", v))
+    }
+
+    pub fn get_output_file(&self) -> String {
+        self.get_output_file_inner().unwrap_or(Self::DEFAULT_OUTPUT.to_string())
+    }
+
+    pub fn get_includes(&self) -> Option<Vec<&str>> {
+        self.table.as_ref()
+            .and_then(|t| t.get("include"))
+            .and_then(|a| a.as_array().map(|v|
+                v.iter().filter_map(|w| w.as_str()).collect()))
+    }
+}
+
+#[derive(Debug)]
 pub struct DomainBuilder {
-    domains: HashMap<String, Vec<u8>>
+    domains: HashMap<String, Vec<TokenStream>>
 }
 
 impl DomainBuilder {
@@ -265,12 +381,43 @@ impl DomainBuilder {
         }
     }
 
+    /*
+    fn get_imports_from_use(&self, tree: &syn::UseTree, s: &mut String) {
+        match tree {
+            syn::UseTree::Path(p) => {
+                s.push_str(&p.ident.to_string());
+                s.push_str("::");
+                self.get_imports_from_use(p.tree.as_ref(), s);
+            },
+            syn::UseTree::Name(p) => {
+                s.push_str(&p.ident.to_string());
+                println!("Add string {}", s);
+            },
+            syn::UseTree::Rename(p) => {
+                s.push_str(&p.ident.to_string());
+                s.push_str(" as ");
+                s.push_str(&p.rename.to_string());
+                println!("Add string {}", s);
+            },
+            _ => ()
+        }
+    }
+    */
+
+    fn add_to_domain(&mut self, s: String, v: TokenStream) {
+        match self.domains.get_mut(&s) {
+            Some(p) => p.push(v),
+            None => { let _ = self.domains.insert(s, vec![v]); },
+        }
+    }
+
     pub fn build<P: AsRef<Path>>(&mut self, dir: P) -> Result<(), Box<dyn Error>> {
+        let config = DomainBuilderConfig::new(dir.as_ref())?;
         let path = dir.as_ref().join("src");
         let path_str = path.to_str().unwrap();
         let start = Instant::now();
         let entries: Vec<_> = WalkDir::new(path.as_path()).into_iter()
-            .filter_map(|v| v.ok().and_then(is_source_file)).collect();
+            .filter_map(|v| v.ok().and_then(|f| is_source_file(f, &config))).collect();
         for entry in &entries {
             // get path relative to the source folder (to build our crate path)
             let entry_path_str = entry.path().to_str().unwrap();
@@ -279,8 +426,11 @@ impl DomainBuilder {
                 None => path_str.len() + 1..entry_path_str.len()
             };
             let entry_rel_path = &entry.path().to_str().unwrap()[entry_range];
-            let module_path = format!("crate::{}", entry_rel_path.replace(std::path::MAIN_SEPARATOR_STR, "::"));
+            let mut support_items = DomainBuilderSupportItem::new(
+                format!("crate::{}::", entry_rel_path.replace(std::path::MAIN_SEPARATOR_STR, "::")));
             let tree = syn::parse_file(&std::fs::read_to_string(entry.path())?)?;
+            // let mut imports = vec![];
+            // let mut declared_structs = HashSet::new();
             for item in &tree.items {
                 match item {
                     syn::Item::Impl(v) => {
@@ -288,21 +438,49 @@ impl DomainBuilder {
                             for func in v.items.iter()
                                 .filter_map(|i| filter_impl_by_sqcrab_methods(i, v.self_ty.as_ref())
                                     .unwrap_or_else(|_| None)) {
-                                func.build(&module_path);
+                                self.add_to_domain(func.get_domain(), func.build(&support_items)?);
                             }
                         }
                     },
+                    syn::Item::Struct(v) => {
+                        support_items.declared_structs.insert(v.ident.to_string());
+                    },
                     syn::Item::Fn(v) => if let Some(a) = get_attribute_by_name(
                         &v.attrs, SQCRAB_ATTR) {
-                        ItemFunction::try_from_function(v, a)?.build(&module_path);
+                        let func = ItemFunction::try_from_function(v, a)?;
+                        self.add_to_domain(func.get_domain(), func.build(&support_items)?);
                     },
+                    syn::Item::Use(v) => {
+                        support_items.imports.push(v);
+                    },
+                    // syn::Item::Use(v) => self.get_imports_from_use(&v.tree, &mut String::new()),
                     _ => continue
                 }
             }
+            // for import in &support_items.imports {
+            //     println!("{}", import.to_token_stream().to_string());
+            // }
         }
+
+        let mut domain_tokens = vec![];
+        for (name, decl) in &self.domains {
+            let name = syn::Ident::new(name, Span::call_site());
+            domain_tokens.push(quote! {
+                pub struct #name;
+
+                impl ::sqcrab::domain::DomainRegistrar for #name {
+                    fn add_functions(vm: &mut ::sqcrab::squirrel::vm::SquirrelVM) -> Result<(), ::sqcrab::squirrel::err::SquirrelError> {
+                        #(#decl)*
+                        Ok(())
+                    }
+                }
+            });
+        }
+        // let file = syn::File::parse.parse2(quote! { #(#domain_tokens)* })?;
+        std::fs::write(path.join(config.get_output_file()), quote! { #(#domain_tokens)* }.to_string())?;
         let ms = Instant::now().duration_since(start).as_millis() as f64;
         if ms > 100. {
-            println!("cargo:warning=Parsing {} files took {} ms. To keep compile times low, it's recommended to only check certain files using .sqdefs", entries.len(), ms);
+            println!("cargo:warning=Parsing {} files took {} ms. To keep compile times low, it's recommended to only check certain files using sqcrab.toml", entries.len(), ms);
         }
         Ok(())
     }

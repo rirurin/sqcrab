@@ -2,6 +2,8 @@ use std::ops::{BitAndAssign, BitOrAssign};
 use bitflags::bitflags;
 // use riri_mod_tools_rt::logln;
 use squirrel::print_cb::DebugHookType;
+use squirrel::vm::SquirrelDebugCallback;
+use crate::crab::SqCrab;
 
 bitflags! {
     #[derive(Debug, Clone, Copy, Ord, PartialOrd, Eq, PartialEq)]
@@ -10,12 +12,13 @@ bitflags! {
         const RUN_ERROR_FUNC = 1 << 1;
         const RUN_COMPILER_ERROR = 1 << 2;
         const RUN_DEBUG_HOOK = 1 << 3;
+        const RUN_EXCEPTION = 1 << 4;
     }
 }
 
 impl Default for DebuggerFlags {
     fn default() -> Self {
-        Self::RUN_PRINT_FUNC | Self::RUN_ERROR_FUNC | Self::RUN_COMPILER_ERROR
+        Self::RUN_PRINT_FUNC | Self::RUN_ERROR_FUNC | Self::RUN_COMPILER_ERROR | Self::RUN_EXCEPTION
     }
 }
 
@@ -97,3 +100,14 @@ impl BitAndAssign<DebuggerFlags> for CrabDebugger {
         self.debugger_flags.bitand_assign(rhs);
     }
 }
+
+/*
+#[derive(Debug)]
+pub struct DebuggerInit {
+    print_cb: Option<<Self as SquirrelDebugCallback>::PrintCallback>,
+    error_cb: Option<<Self as SquirrelDebugCallback>::PrintCallback>,
+    compile_error_cb: Option<<Self as SquirrelDebugCallback>::CompileErrorCallback>,
+    debug_hook_cb: Option<<Self as SquirrelDebugCallback>::DebugHookCallback>,
+    runtime_error_cb: Option<<Self as SquirrelDebugCallback>::RuntimeErrorCallback>,
+}
+*/

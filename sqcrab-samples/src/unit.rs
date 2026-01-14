@@ -19,12 +19,12 @@ impl Default for Unit {
 
 #[sqcrab_hint]
 impl Unit {
-    #[sqcrab(name = "unit_get_hp", domain = "Unit")]
+    #[sqcrab(name = "unit_get_hp", domain = "Test")]
     pub fn get_hp(&self) -> u32 { self.hp }
-    #[sqcrab(name = "unit_set_hp", domain = "Unit")]
+    #[sqcrab(name = "unit_set_hp", domain = "Test")]
     pub fn set_hp(&mut self, v: u32) { self.hp = v }
-    #[sqcrab(name = "unit_get_mp", domain = "Unit")]
+    #[sqcrab(name = "unit_get_mp", domain = "Test")]
     pub fn get_mp(&self) -> u32 { self.mp }
-    #[sqcrab(name = "unit_set_mp", domain = "Unit")]
+    #[sqcrab(name = "unit_set_mp", domain = "Test")]
     pub fn set_mp(&mut self, v: u32) { self.mp = v }
 }

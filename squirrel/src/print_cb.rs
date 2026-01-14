@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard};
 use squirrel_sys::bindings::root::*;
-use crate::vm::ThreadSafeSquirrelVMPointer;
+use crate::vm::{SquirrelVM, ThreadSafeSquirrelVMPointer};
 // print/error
 
 type CallbackTypeBase<T> = Option<HashMap<ThreadSafeSquirrelVMPointer, T>>;
 
-static PRINT_FORMAT_CALLBACKS: Mutex<CallbackTypeBase<fn(&str)>> = Mutex::new(None);
-static ERROR_FORMAT_CALLBACKS: Mutex<CallbackTypeBase<fn(&str)>> = Mutex::new(None);
+pub(crate) type PrintCallback = fn(&str);
+
+static PRINT_FORMAT_CALLBACKS: Mutex<CallbackTypeBase<PrintCallback>> = Mutex::new(None);
+static ERROR_FORMAT_CALLBACKS: Mutex<CallbackTypeBase<PrintCallback>> = Mutex::new(None);
 
 fn get_print_format_callbacks<T>(map: &'static Mutex<CallbackTypeBase<T>>)
                               -> MutexGuard<'static, CallbackTypeBase<T>> {

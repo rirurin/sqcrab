@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
+use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::io::{Cursor, Read};
+use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
@@ -10,6 +12,7 @@ use std::sync::{Mutex, MutexGuard};
 use squirrel_sys::bindings::root::*;
 use crate::err::SquirrelError;
 use crate::obj_type::SquirrelObject;
+use crate::squirrel;
 use crate::type_cnv::CanSquirrel;
 
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
@@ -78,19 +81,31 @@ pub(crate) fn get_squirrel_handle_instances() -> MutexGuard<'static, Option<Squi
     instances
 }
 
-pub(crate) unsafe fn add_squirrel_handle(vm: &mut SquirrelVM) {
+pub unsafe fn add_squirrel_handle(vm: &mut SquirrelVM) {
     get_squirrel_handle_instances().as_mut().unwrap().insert(
         ThreadSafeSquirrelVMPointer(vm.handle),
         SQVMNativeFunctionLink::new(vm)
     );
 }
 
-pub(crate) unsafe fn check_squirrel_handle(vm: &SquirrelVM) -> bool {
+pub unsafe fn check_squirrel_handle(vm: &SquirrelVM) -> bool {
     get_squirrel_handle_instances().as_ref().unwrap()
         .contains_key(&ThreadSafeSquirrelVMPointer(vm.handle))
 }
 
-pub(crate) unsafe fn add_squirrel_function_link(vm: &mut SquirrelVM, name: &str, func: SquirrelFunction) {
+pub unsafe fn from_handle(vm: HSQUIRRELVM) -> Option<&'static SquirrelVM> {
+    get_squirrel_handle_instances().as_ref().unwrap()
+        .get(&ThreadSafeSquirrelVMPointer(vm))
+        .map(|link| unsafe { link.sqvm.as_ref() })
+}
+
+pub unsafe fn from_handle_mut(vm: HSQUIRRELVM) -> Option<&'static mut SquirrelVM> {
+    get_squirrel_handle_instances().as_mut().unwrap()
+        .get_mut(&ThreadSafeSquirrelVMPointer(vm))
+        .map(|link| unsafe { link.sqvm.as_mut() })
+}
+
+pub unsafe fn add_squirrel_function_link(vm: &mut SquirrelVM, name: &str, func: SquirrelFunction) {
     let mut instances = get_squirrel_handle_instances();
     if let Some(link) = instances.as_mut().unwrap()
         .get_mut(&ThreadSafeSquirrelVMPointer(vm.handle)) {
@@ -119,28 +134,37 @@ unsafe extern "C" fn sq_function_base(handle: HSQUIRRELVM) -> SQInteger {
     rust_func(sqvm)
 }
 
-#[derive(Debug)]
-pub struct SquirrelVMBuilder {
-    stack_size: usize,
-    print_cb: Option<fn(&str)>,
-    error_cb: Option<fn(&str)>,
-    enable_debug_info: bool,
-    notify_all_exceptions: bool,
-    compile_error_cb: Option<crate::print_cb::CompilerErrorCallback>,
-    debug_hook_cb: Option<crate::print_cb::DebugHookCallback>,
-    runtime_error_cb: Option<crate::err::ErrorCallback>,
+pub trait SquirrelDebugCallback: Default + Debug {
+    type PrintCallback;
+    fn set_print_cb(&mut self, cb: Self::PrintCallback);
+    fn set_error_cb(&mut self, cb: Self::PrintCallback);
+
+    type CompileErrorCallback;
+    fn set_compile_error_cb(&mut self, cb: Self::CompileErrorCallback);
+    type DebugHookCallback;
+    fn set_debug_hook_cb(&mut self, cb: Self::DebugHookCallback);
+    type RuntimeErrorCallback;
+    fn set_runtime_error_cb(&mut self, cb: Self::RuntimeErrorCallback);
+
+    unsafe fn build(&mut self, handle: HSQUIRRELVM);
+
+    unsafe fn cleanup(vm: &mut SquirrelVM);
 }
 
-impl Default for SquirrelVMBuilder {
+#[derive(Debug)]
+pub struct SquirrelDebugCallbackBasic {
+    print_cb: Option<<Self as SquirrelDebugCallback>::PrintCallback>,
+    error_cb: Option<<Self as SquirrelDebugCallback>::PrintCallback>,
+    compile_error_cb: Option<<Self as SquirrelDebugCallback>::CompileErrorCallback>,
+    debug_hook_cb: Option<<Self as SquirrelDebugCallback>::DebugHookCallback>,
+    runtime_error_cb: Option<<Self as SquirrelDebugCallback>::RuntimeErrorCallback>,
+}
+
+impl Default for SquirrelDebugCallbackBasic {
     fn default() -> Self {
         Self {
-            // vm options
-            stack_size: 0x400,
             print_cb: None,
             error_cb: None,
-            // compiler options
-            enable_debug_info: false,
-            notify_all_exceptions: false,
             compile_error_cb: None,
             debug_hook_cb: None,
             runtime_error_cb: None
@@ -148,42 +172,34 @@ impl Default for SquirrelVMBuilder {
     }
 }
 
-impl SquirrelVMBuilder {
-    pub fn set_stack_size(mut self, v: usize) -> Self {
-        self.stack_size = v;
-        self
-    }
-    pub fn set_print_fn(mut self, cb: fn(&str)) -> Self {
+impl SquirrelDebugCallback for SquirrelDebugCallbackBasic {
+    type PrintCallback = crate::print_cb::PrintCallback;
+
+    fn set_print_cb(&mut self, cb: Self::PrintCallback) {
         self.print_cb = Some(cb);
-        self
-    }
-    pub fn set_error_fn(mut self, cb: fn(&str)) -> Self {
-        self.error_cb = Some(cb);
-        self
-    }
-    pub fn set_enable_debug_info(mut self, v: bool) -> Self {
-        self.enable_debug_info = v;
-        self
-    }
-    pub fn set_notify_all_exceptions(mut self, v: bool) -> Self {
-        self.notify_all_exceptions = v;
-        self
-    }
-    pub fn set_compile_error_cb(mut self, cb: crate::print_cb::CompilerErrorCallback) -> Self {
-        self.compile_error_cb = Some(cb);
-        self
-    }
-    pub fn set_debug_hook_cb(mut self, cb: crate::print_cb::DebugHookCallback) -> Self {
-        self.debug_hook_cb = Some(cb);
-        self
-    }
-    pub fn set_runtime_error_cb(mut self, cb: crate::err::ErrorCallback) -> Self {
-        self.runtime_error_cb = Some(cb);
-        self
     }
 
-    pub fn build(self) -> SquirrelVM {
-        let handle = unsafe { sq_open((self.stack_size as i64).into()) };
+    fn set_error_cb(&mut self, cb: Self::PrintCallback) {
+        self.error_cb = Some(cb);
+    }
+    type CompileErrorCallback = crate::print_cb::CompilerErrorCallback;
+
+    fn set_compile_error_cb(&mut self, cb: Self::CompileErrorCallback) {
+        self.compile_error_cb = Some(cb);
+    }
+    type DebugHookCallback = crate::print_cb::DebugHookCallback;
+
+    fn set_debug_hook_cb(&mut self, cb: Self::DebugHookCallback) {
+        self.debug_hook_cb = Some(cb);
+    }
+
+    type RuntimeErrorCallback = crate::err::ErrorCallback;
+
+    fn set_runtime_error_cb(&mut self, cb: Self::RuntimeErrorCallback) {
+        self.runtime_error_cb = Some(cb);
+    }
+
+    unsafe fn build(&mut self, handle: HSQUIRRELVM) {
         if let Some(cb) = self.print_cb {
             crate::print_cb::register_print_format_callback(handle, cb);
         }
@@ -203,14 +219,76 @@ impl SquirrelVMBuilder {
             );
             sq_setcompilererrorhandler(handle, Some(crate::print_cb::sq_compile_error_callback));
             sq_setnativedebughook(handle, Some(crate::print_cb::sq_debug_hook_callback));
-            sq_enabledebuginfo(handle, self.enable_debug_info.into_squirrel());
-            sq_notifyallexceptions(handle, self.notify_all_exceptions.into_squirrel());
             if let Some(cb) = self.runtime_error_cb {
                 sq_newclosure(handle, Some(cb), 0);
                 sq_seterrorhandler(handle);
             }
         }
-        SquirrelVM { handle }
+    }
+
+    unsafe fn cleanup(vm: &mut SquirrelVM) {
+        if crate::print_cb::get_print_format_callback(vm.handle).is_some() {
+            crate::print_cb::remove_print_format_callback(vm.handle);
+        }
+        if crate::print_cb::get_error_format_callback(vm.handle).is_some() {
+            crate::print_cb::remove_error_format_callback(vm.handle);
+        }
+        if crate::print_cb::get_compiler_error_callback(vm.handle).is_some() {
+            crate::print_cb::remove_compiler_error_callback(vm.handle);
+        }
+        if crate::print_cb::get_debug_hook_callback(vm.handle).is_some() {
+            crate::print_cb::remove_debug_hook_callback(vm.handle);
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct SquirrelVMBuilder<C: SquirrelDebugCallback = SquirrelDebugCallbackBasic> {
+    stack_size: usize,
+    enable_debug_info: bool,
+    notify_all_exceptions: bool,
+    callbacks: C
+}
+
+impl<C: SquirrelDebugCallback> Default for SquirrelVMBuilder<C> {
+    fn default() -> Self {
+        Self {
+            // vm options
+            stack_size: 0x400,
+            // compiler options
+            enable_debug_info: false,
+            notify_all_exceptions: false,
+            callbacks: C::default(),
+        }
+    }
+}
+
+impl<C: SquirrelDebugCallback> SquirrelVMBuilder<C> {
+    pub fn set_stack_size(mut self, v: usize) -> Self {
+        self.stack_size = v;
+        self
+    }
+    pub fn callbacks(mut self, cb: fn(&mut C)) -> Self {
+        cb(&mut self.callbacks);
+        self
+    }
+    pub fn set_enable_debug_info(mut self, v: bool) -> Self {
+        self.enable_debug_info = v;
+        self
+    }
+    pub fn set_notify_all_exceptions(mut self, v: bool) -> Self {
+        self.notify_all_exceptions = v;
+        self
+    }
+
+    pub fn build(mut self) -> SquirrelVM {
+        let handle = unsafe { sq_open((self.stack_size as i64).into()) };
+        unsafe {
+            sq_enabledebuginfo(handle, self.enable_debug_info.into_squirrel());
+            sq_notifyallexceptions(handle, self.notify_all_exceptions.into_squirrel());
+            self.callbacks.build(handle);
+        }
+        SquirrelVM { handle, cleanup_cb: C::cleanup }
     }
 }
 
@@ -244,20 +322,20 @@ macro_rules! squirrel {
     ($vm:ident $name:ident($($val:expr, $ty:ty),* $(,)?) -> $ret:ty) => {
         {
             let n = stringify!($name);
-            let handle: ::squirrel_sys::bindings::root::HSQUIRRELVM = unsafe { $vm.raw() };
+            let handle: squirrel::squirrel_sys::bindings::root::HSQUIRRELVM = unsafe { $vm.raw() };
             unsafe {
-                ::squirrel_sys::bindings::root::sq_pushroottable(handle);
-                ::squirrel_sys::bindings::root::sq_pushstring(handle, n.as_ptr() as _, n.len() as _);
-                let res = ::squirrel_sys::bindings::root::sq_get(handle, -2); // get function from root table
+                squirrel::squirrel_sys::bindings::root::sq_pushroottable(handle);
+                squirrel::squirrel_sys::bindings::root::sq_pushstring(handle, n.as_ptr() as _, n.len() as _);
+                let res = squirrel::squirrel_sys::bindings::root::sq_get(handle, -2); // get function from root table
                 if res == 0 {
-                    ::squirrel_sys::bindings::root::sq_push(handle, -2); // root table
+                    squirrel::squirrel_sys::bindings::root::sq_push(handle, -2); // root table
                     let args = (1 + $crate::sqvm_call_count_type_args!($($ty),*)) as i64;
                     $crate::sqvm_call_push_param!($vm $($val, $ty),*);
-                    let res = ::squirrel_sys::bindings::root::sq_call(handle, args, true.into(), true.into());
+                    let res = squirrel::squirrel_sys::bindings::root::sq_call(handle, args, true.into(), true.into());
                     match res {
                         0 => {
                             let val: $ret = $vm.get::<$ret>(1)?;
-                            ::squirrel_sys::bindings::root::sq_pop(handle, 3);
+                            squirrel::squirrel_sys::bindings::root::sq_pop(handle, 3);
                             Ok::<$ret, $crate::err::SquirrelError>(val)
                         },
                         _ => Err($crate::err::SquirrelError::ErrorWhileCalling)
@@ -277,12 +355,16 @@ const SQ_VMSTATE_SUSPENDED    : i64 = 2;
 #[derive(Debug)]
 pub struct SquirrelVM {
     pub(crate) handle: HSQUIRRELVM,
+    cleanup_cb: unsafe fn(&mut Self)
 }
 
 impl SquirrelVM {
     pub fn new() -> SquirrelVMBuilder {
         SquirrelVMBuilder::default()
     }
+}
+
+impl SquirrelVM {
 
     pub fn version() -> (u32, u32) {
         let raw = unsafe { sq_getversion() };
@@ -473,19 +555,10 @@ impl SquirrelVM {
 
 impl Drop for SquirrelVM {
     fn drop(&mut self) {
-        unsafe { remove_squirrel_handle(self.handle) };
-        if crate::print_cb::get_print_format_callback(self.handle).is_some() {
-            crate::print_cb::remove_print_format_callback(self.handle);
+        unsafe {
+            remove_squirrel_handle(self.handle);
+            (self.cleanup_cb)(self);
+            sq_close(self.handle);
         }
-        if crate::print_cb::get_error_format_callback(self.handle).is_some() {
-            crate::print_cb::remove_error_format_callback(self.handle);
-        }
-        if crate::print_cb::get_compiler_error_callback(self.handle).is_some() {
-            crate::print_cb::remove_compiler_error_callback(self.handle);
-        }
-        if crate::print_cb::get_debug_hook_callback(self.handle).is_some() {
-            crate::print_cb::remove_debug_hook_callback(self.handle);
-        }
-        unsafe { sq_close(self.handle) };
     }
 }
