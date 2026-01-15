@@ -51,19 +51,7 @@ where &'a mut T: CanSquirrel<Into = UserPointer<&'a mut T>>
         }
         SqCrab::<'a, CrabDebugger, T>::from_parts(vm, CrabDebugger::new(DebuggerFlags::default()))
     }
-
-    pub fn build2(self) -> SqCrab<'a, CrabDebugger, T> {
-        let mut vm = Box::new(self.inner.build());
-        if unsafe { !squirrel::vm::check_squirrel_handle(vm.as_ref()) } {
-            unsafe { squirrel::vm::add_squirrel_handle(vm.as_mut()) };
-        }
-        SqCrab::<'a, CrabDebugger, T>::from_parts(vm, CrabDebugger::new(DebuggerFlags::default()))
-    }
 }
-
-// type CrabDebuggerMap = HashMap<ThreadSafeSquirrelVMPointer, >;
-
-// pub static CRAB_DEBUGGER_INSTANCES: Mutex<Option<HashMap<>>>
 
 #[derive(Debug)]
 pub struct SqCrab<'a, D, T>
@@ -108,23 +96,6 @@ where D: ScriptDebugger,
     where F: DomainRegistrar {
         F::add_functions(self)
     }
-
-    /*
-    pub fn using_this<F>(&mut self, p: &'a mut T, cb: F) -> Result<(), Box<dyn Error>>
-    where F: Fn(&mut Self) -> Result<(), Box<dyn Error>> {
-        unsafe { self.sqvm.set_this(p) };
-        cb(self)?;
-        unsafe { self.sqvm.clear_this() };
-        Ok(())
-    }
-    */
-    /*
-    pub fn get_this(&self) -> Result<&mut T, SquirrelError> {
-        // unsafe { &mut *(squirrel::squirrel_sys::bindings::root::sq_getforeignptr(self.raw()) as *mut T) }
-        // self.sqvm.get_this()
-        Err(SquirrelError::ForeignPointerNotSet)
-    }
-    */
     pub fn using_this<F>(&mut self, p: *mut T, cb: F) -> Result<(), Box<dyn Error>>
     where F: Fn(&mut Self) -> Result<(), Box<dyn Error>> {
         unsafe { self.sqvm.set_this(std::mem::transmute::<_, &'a mut T>(p)) };

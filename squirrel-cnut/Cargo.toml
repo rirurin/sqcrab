@@ -1,0 +1,11 @@
+[package]
+name = "squirrel-cnut"
+version.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+license-file.workspace = true
+edition.workspace = true
+
+[dependencies]
+squirrel-sys = { path = "../squirrel-sys" }

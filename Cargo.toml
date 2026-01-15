@@ -7,6 +7,7 @@ members = [
     "sqcrab-macro-impl",
     "sqcrab-samples",
     "squirrel",
+    "squirrel-cnut",
     "squirrel-sys"
 ]
 

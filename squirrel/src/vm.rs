@@ -508,7 +508,7 @@ impl SquirrelVM {
         Ok(())
     }
 
-    /// Compiles a squirrel program (.nut) from the given file path.
+    /// Compiles and imports a squirrel source file (.nut) from the given file path.
     pub fn import_text_from_file<P: AsRef<Path>>(&mut self, path: P) -> Result<(), Box<dyn Error>> {
         let path_str = path.as_ref().to_str().unwrap();
         let buf = std::fs::read_to_string(path.as_ref())?;
@@ -516,10 +516,11 @@ impl SquirrelVM {
         Ok(())
     }
 
-    /// Compiles a squirrel program (.nut) from the string.
+    /// Compiles and imports a squirrel source file (.nut) from the string.
     pub fn import_text_from_str(&mut self, buf: &str) -> Result<(), SquirrelError> {
         self.import_text_inner(buf, &self.source_name())
     }
+
 
     fn import_binary_inner(&mut self, buf: &[u8], src: &str) -> Result<(), SquirrelError> {
         self.try_read(buf, src)?;
@@ -532,7 +533,7 @@ impl SquirrelVM {
         Ok(())
     }
 
-    // file reading
+    /// Imports a squirrel bytecode file (.cnut) from the given file path.
     pub fn import_binary_from_file<P: AsRef<Path>>(&mut self, path: P) -> Result<(), Box<dyn Error>> {
         let path_str = path.as_ref().to_str().unwrap();
         let buf = std::fs::read(path.as_ref())?;
@@ -540,6 +541,7 @@ impl SquirrelVM {
         Ok(())
     }
 
+    /// Imports a squirrel bytecode file (.cnut) from the byte slice.
     pub fn import_binary_from_slice(&mut self, buf: &[u8]) -> Result<(), SquirrelError> {
         self.import_binary_inner(&buf, &self.source_name())?;
         Ok(())
@@ -610,6 +612,22 @@ impl SquirrelVM {
             0 => Ok(()),
             _ => Err(SquirrelError::CouldNotWakeupVM)
         }
+    }
+
+    pub fn get_global_symbol_keys(&self) -> Result<HashSet<String>, SquirrelError> {
+        let mut keys = HashSet::new();
+        unsafe {
+            sq_pushroottable(self.handle);
+            sq_pushnull(self.handle); // null iterator
+            while sq_next(self.handle, -2) == 0 {
+                // value is -1, key is -2
+                keys.insert(self.get::<String>(2)?);
+                // pop key and value before next iteration
+                sq_pop(self.handle, 2);
+            }
+            sq_pop(self.handle, 2); // pops the null iterator and root table
+        }
+        Ok(keys)
     }
 }
 

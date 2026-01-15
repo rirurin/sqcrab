@@ -9,7 +9,7 @@ pub mod unit;
 fn execute() -> Result<(), Box<dyn Error>> {
     let mut unit = Unit::default();
     println!("Start: {:?}", unit);
-    let mut script = sqcrab::SqCrab::<_, Unit>::new().build2();
+    let mut script = sqcrab::SqCrab::<_, Unit>::new().build();
     script.register::<sqcrab_domains::Test>()?;
     let exe_dir = PathBuf::from(std::env::current_exe()?.parent().unwrap());
     script.import_text_from_file(exe_dir.join("unit.nut"))?;
