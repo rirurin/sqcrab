@@ -10,5 +10,5 @@ edition.workspace = true
 [dependencies]
 bitflags = "2.10"
 humantime = "2.3.0"
-riri-mod-tools-rt = { git = "https://github.com/rirurin/riri-mod-tools", features = ["detailed-logs"] }
+# riri-mod-tools-rt = { git = "https://github.com/rirurin/riri-mod-tools", features = ["detailed-logs"] }
 squirrel = { path = "../squirrel" }

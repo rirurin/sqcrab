@@ -1,19 +1,6 @@
-function GetMeter() {
-    local hp = this.GetHP();
-    print("Player HP is " + hp);
-    local mp = this.GetMP();
-    print("Player MP is " + mp);
-}
-
-function HealHP(n) {
-    this.SetHP(this.GetHP() + n);
-}
-
-function HealMP(n) {
-    this.SetMP(this.GetMP() + n);
-}
-
-function MeterChange() {
-    this.HealHP(10);
-    this.HealMP(5);
+function replenish_unit() {
+    local current_hp = this.unit_get_hp();
+    this.unit_set_hp(current_hp + 25);
+    local current_mp = this.unit_get_mp();
+    this.unit_set_mp(current_mp + 10);
 }

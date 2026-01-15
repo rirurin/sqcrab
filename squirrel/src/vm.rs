@@ -11,7 +11,8 @@ use std::ptr::NonNull;
 use std::sync::{Mutex, MutexGuard};
 use squirrel_sys::bindings::root::*;
 use crate::err::SquirrelError;
-use crate::obj_type::SquirrelObject;
+use crate::obj_type::{SquirrelObject, UserPointer};
+use crate::object::SquirrelTypeId;
 use crate::squirrel;
 use crate::type_cnv::CanSquirrel;
 
@@ -316,6 +317,7 @@ macro_rules! sqvm_call_count_type_args {
 
 #[macro_export]
 macro_rules! squirrel {
+    // Passing all arguments into squirrel
     ($vm:ident $name:ident($($val:expr, $ty:ty),* $(,)?)) => {
         $crate::squirrel!($vm $name($($val, $ty),*) -> ())
     };
@@ -346,6 +348,46 @@ macro_rules! squirrel {
             }
         }
     };
+    // For methods: Pass this as foreign pointer
+    ($vm:ident $name:ident($sty:ty)) => {
+        $crate::squirrel!($vm $name($sty,))
+    };
+    ($vm:ident $name:ident($sty:ty) -> $ret:ty) => {
+        $crate::squirrel!($vm $name($sty,) -> $ret)
+    };
+    ($vm:ident $name:ident($sty:ty, $($val:expr, $ty:ty),* $(,)?)) => {
+        $crate::squirrel!($vm $name($sty, $($val, $ty),*) -> ())
+    };
+    ($vm:ident $name:ident($sty:ty, $($val:expr, $ty:ty),* $(,)?) -> $ret:ty) => {
+        {
+            let n = stringify!($name);
+            let handle: squirrel::squirrel_sys::bindings::root::HSQUIRRELVM = unsafe { $vm.raw() };
+            unsafe {
+                squirrel::squirrel_sys::bindings::root::sq_pushroottable(handle);
+                squirrel::squirrel_sys::bindings::root::sq_pushstring(handle, n.as_ptr() as _, n.len() as _);
+                let res = squirrel::squirrel_sys::bindings::root::sq_get(handle, -2); // get function from root table
+                if res == 0 {
+                    squirrel::squirrel_sys::bindings::root::sq_push(handle, -2); // root table
+                    let args = (1 + $crate::sqvm_call_count_type_args!($($ty),*)) as i64;
+                    $crate::sqvm_call_push_param!($vm $($val, $ty),*);
+                    let res = squirrel::squirrel_sys::bindings::root::sq_call(handle, args, true.into(), true.into());
+                    match res {
+                        0 => {
+                            let val: $ret = $vm.get::<$ret>(1)?;
+                            squirrel::squirrel_sys::bindings::root::sq_pop(handle, 3);
+                            Ok::<$ret, $crate::err::SquirrelError>(val)
+                        },
+                        _ => {
+                            let _: Result<$sty, _> = $vm.get::<$sty>(1);
+                            Err($crate::err::SquirrelError::ErrorWhileCalling)
+                        }
+                    }
+                } else {
+                    Err($crate::err::SquirrelError::CouldNotFindFunction(n.to_string()))
+                }
+            }
+        }
+    };
 }
 
 // const SQ_VMSTATE_IDLE         : i64 = 0;
@@ -365,7 +407,6 @@ impl SquirrelVM {
 }
 
 impl SquirrelVM {
-
     pub fn version() -> (u32, u32) {
         let raw = unsafe { sq_getversion() };
         ((raw / 100) as u32, (raw % 100) as u32)
@@ -397,6 +438,25 @@ impl SquirrelVM {
     // get_type
     pub unsafe fn get_type(&self, index: usize) -> SQObjectType {
         unsafe { sq_gettype(self.handle, -(index as i64) )}
+    }
+
+    // setforeignptr
+    pub unsafe fn set_this<'a, T>(&mut self, p: &'a mut T)
+    where &'a mut T: CanSquirrel<Into = UserPointer<&'a mut T>> + 'a {
+        unsafe { sq_setforeignptr(self.handle, p as *const T as _) };
+    }
+
+    pub unsafe fn clear_this(&mut self) {
+        unsafe { sq_setforeignptr(self.handle, std::ptr::null_mut()) };
+    }
+
+    // getforeignptr
+    pub unsafe fn get_this<'a, T>(&self) -> Result<&'a mut T, SquirrelError>
+    where &'a mut T: CanSquirrel<Into = UserPointer<&'a mut T>> {
+        match unsafe { sq_getforeignptr(self.handle) } {
+            v if v == std::ptr::null_mut() => Err(SquirrelError::ForeignPointerNotSet),
+            v => Ok(unsafe { &mut *(v as *mut T) })
+        }
     }
 
     pub fn get_stack_len(&mut self) -> usize {

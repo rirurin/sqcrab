@@ -15,7 +15,8 @@ pub enum SquirrelError {
     CouldNotAddFunction,
     CouldNotSetNativeClosureName,
     ObjectTypeDoesNotMatch,
-    CouldNotFindFunction(String)
+    CouldNotFindFunction(String),
+    ForeignPointerNotSet
 }
 
 impl Error for SquirrelError {}

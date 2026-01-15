@@ -12,11 +12,13 @@ const RUST_FILE_EXTENSION: &'static str = "rs";
 const SQCRAB_HINT_ATTR: &'static str = "sqcrab_hint";
 const SQCRAB_ATTR: &'static str = "sqcrab";
 
-fn is_source_file(d: DirEntry, conf: &DomainBuilderConfig) -> Option<DirEntry> {
+fn is_source_file<P: AsRef<Path>>(base: P, d: DirEntry, conf: &DomainBuilderConfig) -> Option<DirEntry> {
     // this iterator checks from src, which should all be rust files
+    let base_str = base.as_ref().to_str().unwrap();
     match d.file_type().is_file() {
         true => {
-            let name = d.path().file_stem().unwrap().to_str().unwrap();
+            let path_str = d.path().to_str().unwrap();
+            let name = &path_str[base_str.len() + 1..path_str.rfind(".").unwrap_or(path_str.len())];
             if &conf.get_output_file() == name {
                 return None;
             }
@@ -64,7 +66,8 @@ fn filter_impl_by_sqcrab_methods<'a>(i: &'a syn::ImplItem, t: &'a syn::Type) -> 
 pub struct SqcrabParams {
     name: Option<String>,
     domain: Option<String>,
-    type_checking: bool
+    type_checking: bool,
+    local_pointer: bool
 }
 
 impl SqcrabParams {
@@ -79,6 +82,15 @@ impl SqcrabParams {
         }
         Err(syn::Error::new(Span::call_site(), "Value type for name should be a string"))
     }
+
+    fn get_bool_value(rhs: &syn::Expr) -> syn::Result<bool> {
+        if let syn::Expr::Lit(l) = rhs {
+            if let syn::Lit::Bool(b) = &l.lit {
+                return Ok(b.value())
+            }
+        }
+        Err(syn::Error::new(Span::call_site(), "Value type for name should be a bool"))
+    }
 }
 
 impl Parse for SqcrabParams {
@@ -86,12 +98,16 @@ impl Parse for SqcrabParams {
         let inputs = syn::punctuated::Punctuated::<syn::ExprAssign, Token![,]>::parse_terminated(input)?;
         let mut name: Option<String> = None;
         let mut domain: Option<String> = None;
+        let mut type_checking = false;
+        let mut local_pointer = false;
         for input in inputs {
             if let syn::Expr::Path(p) = input.left.as_ref() {
                 if let Some(p) = p.path.get_ident() {
                     match p.to_string().as_ref() {
                         "name" => name = Some(Self::get_name_value(input.right.as_ref())?),
                         "domain" => domain = Some(Self::get_name_value(input.right.as_ref())?),
+                        "type_checking" => type_checking = Self::get_bool_value(input.right.as_ref())?,
+                        "local_pointer" => type_checking = Self::get_bool_value(input.right.as_ref())?,
                         _ => return Err(syn::Error::new(Span::call_site(), &format!("Unknown parameter {}", p.to_string())))
                     }
                 } else {
@@ -106,7 +122,7 @@ impl Parse for SqcrabParams {
             return Err(syn::Error::new(Span::call_site(), "Name field is required"));
         }
         */
-        Ok(Self { name, domain, type_checking: false })
+        Ok(Self { name, domain, type_checking, local_pointer })
     }
 }
 
@@ -261,9 +277,16 @@ impl<'a> ItemFunction<'a> {
                             // let path_tokens: TokenStream = path.parse()?;
                             let path = Self::build_struct_path(this_name, sup)?;
                             // TODO: Type checking
-                            param_decls.push(quote! {
-                                let #param_name = vm.get::<#ref_ty #path #this_name>(#stack_idx).unwrap();
-                            });
+                            if self.attribute.local_pointer {
+                                param_decls.push(quote! {
+                                    let #param_name = vm.get::<#ref_ty #path #this_name>(#stack_idx).unwrap();
+                                });
+                            } else {
+                                param_decls.push(quote! {
+                                    // let #param_name = vm.get_this::<#ref_ty #path #this_name>().unwrap();
+                                    let #param_name = unsafe { vm.get_this::<#path #this_name>().unwrap() };
+                                });
+                            }
                         }
                     }
                 },
@@ -417,7 +440,7 @@ impl DomainBuilder {
         let path_str = path.to_str().unwrap();
         let start = Instant::now();
         let entries: Vec<_> = WalkDir::new(path.as_path()).into_iter()
-            .filter_map(|v| v.ok().and_then(|f| is_source_file(f, &config))).collect();
+            .filter_map(|v| v.ok().and_then(|f| is_source_file(path.as_path(), f, &config))).collect();
         for entry in &entries {
             // get path relative to the source folder (to build our crate path)
             let entry_path_str = entry.path().to_str().unwrap();
