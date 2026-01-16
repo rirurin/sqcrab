@@ -12,6 +12,7 @@ const MAGIC_SQIR: u32 = 0x53514952;
 const NUT_HEADER_SIZE: usize = 0x12;
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct NutHeader {
     sizeof_char: u32,
     sizeof_int: u32,

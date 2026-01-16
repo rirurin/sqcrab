@@ -1,3 +1,4 @@
+#![allow(unused_imports)]
 use std::fmt::{Debug, Formatter, Pointer};
 use std::io::{Cursor, Seek, SeekFrom};
 use squirrel_sys::bindings::root::*;
@@ -43,7 +44,6 @@ impl BinObject {
             Self::Integer(_) => tagSQObjectType_OT_INTEGER,
             Self::Float(_) => tagSQObjectType_OT_FLOAT,
             Self::String(_) => tagSQObjectType_OT_STRING,
-            _ => 0
         }
     }
 }

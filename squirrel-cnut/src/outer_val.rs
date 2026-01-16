@@ -6,6 +6,7 @@ use crate::utils::slice::FromSlice;
 use crate::utils::endianness::Endianness;
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct OuterValue {
     ty: i32,
     src: BinObject,
