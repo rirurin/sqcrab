@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::str::Utf8Error;
+use squirrel_sys::bindings::root::tagSQObjectType;
 
 #[derive(Debug)]
 pub enum SquirrelBinaryError {
@@ -8,10 +9,10 @@ pub enum SquirrelBinaryError {
     InvalidSQIRError,
     InvalidTail,
     InvalidOpcode(u8),
-    UnimplementedBinObject(i32),
-    WrongBinObjectType(i32),
+    UnimplementedBinObject(tagSQObjectType),
+    WrongBinObjectType(tagSQObjectType),
     OutOfRange,
-    ExpectedTrap,
+    ExpectedPart,
     InvalidBitwiseOp(u8),
     InvalidCmpOp(u8),
     InvalidNewObjectType(u8),

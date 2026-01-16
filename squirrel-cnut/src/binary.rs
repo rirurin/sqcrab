@@ -61,7 +61,7 @@ impl NutEnd {
     }
 }
 
-pub(crate) const TRAP: u32 = 0x50415254;
+pub(crate) const PART: u32 = 0x50415254;
 
 #[cfg(test)]
 pub mod tests {

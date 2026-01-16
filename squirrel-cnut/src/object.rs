@@ -13,12 +13,13 @@ pub enum BinObject {
     Integer(i64),
     Float(f32),
     String(*const str),
+    Boolean(bool)
 }
 
 impl BinObject {
     pub fn new<E: Endianness>(stream: &mut Cursor<&[u8]>) -> Result<Self, SquirrelBinaryError> {
         let slice = &stream.get_ref()[stream.position() as usize..];
-        let type_id = from_slice!(slice, i32, E, 0x0);
+        let type_id = from_slice!(slice, tagSQObjectType, E, 0x0);
         #[allow(non_upper_case_globals)]
         match type_id {
             tagSQObjectType_OT_STRING => {
@@ -28,8 +29,12 @@ impl BinObject {
                     .map_err(|e| SquirrelBinaryError::Utf8Error(e))?))
             },
             tagSQObjectType_OT_INTEGER => {
-                try_advance(stream, 8)?;
-                Ok(Self::Integer(from_slice!(slice, i32, E, 0x4) as i64))
+                try_advance(stream, 12)?;
+                Ok(Self::Integer(from_slice!(slice, i64, E, 0x4)))
+            },
+            tagSQObjectType_OT_BOOL => {
+                try_advance(stream, 12)?;
+                Ok(Self::Boolean(from_slice!(slice, i64, E, 0x4) != 0))
             },
             tagSQObjectType_OT_FLOAT => {
                 try_advance(stream, 8)?;
@@ -39,11 +44,12 @@ impl BinObject {
         }
     }
 
-    pub fn type_id(&self) -> i32 {
+    pub fn type_id(&self) -> tagSQObjectType {
         match self {
             Self::Integer(_) => tagSQObjectType_OT_INTEGER,
             Self::Float(_) => tagSQObjectType_OT_FLOAT,
             Self::String(_) => tagSQObjectType_OT_STRING,
+            Self::Boolean(_) => tagSQObjectType_OT_BOOL
         }
     }
 }
@@ -54,6 +60,7 @@ impl Debug for BinObject {
             Self::Integer(i) => write!(f, "BinObject::Integer({})", *i),
             Self::Float(i) => write!(f, "BinObject::Float({})", *i),
             Self::String(i) => write!(f, "BinObject::String('{}')", unsafe { &**i }),
+            Self::Boolean(i) => write!(f, "BinObject::Boolean({})", *i),
         }
     }
 }
@@ -87,6 +94,17 @@ impl TryFrom<&BinObject> for &str {
         match value {
             BinObject::String(i) => Ok(unsafe { &**i }),
             _ => Err(SquirrelBinaryError::WrongBinObjectType(tagSQObjectType_OT_STRING))
+        }
+    }
+}
+
+impl TryFrom<&BinObject> for bool {
+    type Error = SquirrelBinaryError;
+
+    fn try_from(value: &BinObject) -> Result<Self, Self::Error> {
+        match value {
+            BinObject::Boolean(i) => Ok(*i),
+            _ => Err(SquirrelBinaryError::WrongBinObjectType(tagSQObjectType_OT_BOOL))
         }
     }
 }

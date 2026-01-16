@@ -212,7 +212,7 @@ The following keys are currently supported:
 
 ```toml
 # relative to src
-include = [ "list" "of" "files/to/include" ]
+include = [ "list", "of", "files/to/include" ]
 # if omitted, this is set to sqcrab_domains
 output = "sqcrab_bind_name"
 ```
@@ -232,3 +232,5 @@ importing the functions from that domain into a SqCrab virtual machine, then cal
 
 - **albertodemichelis** ([Github](https://github.com/albertodemichelis), [Twitter](https://x.com/squirrellang)) - [Squirrel Language](https://github.com/albertodemichelis/squirrel)
 - **Sqrat Developers** (atai, tojiro, wizzard97) - [Squirrel binding library for C++](https://github.com/hakase-labs/sqrat)
+- **modmusu** ([Github](https://github.com/modmusu)) - [NutCracker-Metaphor](https://github.com/modmusu/NutCracker-Metaphor)
+- **darknesswind** ([Github](https://github.com/darknesswind)) and **DamianXVI** - [Original NutCracker](https://github.com/darknesswind/NutCracker) (Squirrel decompiler)
